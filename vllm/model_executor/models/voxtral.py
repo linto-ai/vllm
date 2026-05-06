@@ -333,9 +333,18 @@ class VoxtralForConditionalGeneration(
         self.downsample_factor = self.config.audio_config.downsample_factor
 
         with self._mark_language_model(vllm_config):
+            # Voxtral's text_config inherits from a Mistral 7B-class model
+            # but the config itself does not declare `architectures`. Without
+            # an explicit override, init_vllm_registered_model falls back to
+            # the Transformers backend which does not propagate
+            # `sliding_window` to the attention layers. Force the dispatch on
+            # MistralForCausalLM so SlidingWindowSpec is correctly produced.
+            # cf. vllm-project/vllm#38233 — KV cache pool sizing on 16 GB
+            # GPUs.
             self.language_model = init_vllm_registered_model(
                 vllm_config=vllm_config,
                 hf_config=config.text_config,
+                architectures=["MistralForCausalLM"],
                 prefix=maybe_prefix(prefix, "language_model"),
             )
 
