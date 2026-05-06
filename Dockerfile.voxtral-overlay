@@ -1,0 +1,26 @@
+# Overlay image: vllm/vllm-openai:nightly + Voxtral realtime sliding-window patches
+# Patches:
+#   - vllm/model_executor/models/llama.py: honor uniform sliding_window
+#   - vllm/v1/core/sched/scheduler.py: cap streaming sessions at max_model_len
+# Source branch: linto-ai/vllm@voxtral-realtime-sliding-window
+
+ARG BASE_IMAGE=vllm/vllm-openai:nightly
+FROM ${BASE_IMAGE}
+
+USER root
+
+COPY vllm/model_executor/models/llama.py /tmp/patch/llama.py
+COPY vllm/v1/core/sched/scheduler.py /tmp/patch/scheduler.py
+
+RUN VLLM_PATH=$(python3 -c 'import vllm, os; print(os.path.dirname(vllm.__file__))') && \
+    echo "Patching vLLM at ${VLLM_PATH}" && \
+    cp /tmp/patch/llama.py "${VLLM_PATH}/model_executor/models/llama.py" && \
+    cp /tmp/patch/scheduler.py "${VLLM_PATH}/v1/core/sched/scheduler.py" && \
+    rm -rf /tmp/patch && \
+    find "${VLLM_PATH}" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+
+RUN pip install --no-cache-dir soundfile soxr librosa
+
+LABEL org.opencontainers.image.source="https://github.com/linto-ai/vllm"
+LABEL org.opencontainers.image.description="vLLM nightly + Voxtral realtime sliding-window patches"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
