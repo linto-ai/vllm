@@ -23,6 +23,7 @@ from .protocol import (
     InputAudioBufferAppend,
     InputAudioBufferCommit,
     SessionCreated,
+    SessionUpdated,
     TranscriptionDelta,
     TranscriptionDone,
 )
@@ -52,6 +53,12 @@ class RealtimeConnection:
 
         self._is_connected = False
         self._is_model_validated = False
+        # Lazy arming: a non-final commit received before any audio defers
+        # start_generation() to the first append, so the engine never runs a
+        # request over an empty audio queue (a connection that dies before
+        # sending audio leaves nothing running server-side).
+        self._audio_received = False
+        self._arm_pending = False
 
         self._max_audio_filesize_mb = envs.VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
 
@@ -98,9 +105,11 @@ class RealtimeConnection:
         """Route events to handlers.
 
         Supported event types:
-        - session.update: Configure model
-        - input_audio_buffer.append: Add audio chunk to queue
-        - input_audio_buffer.commit: Start transcription generation
+        - session.update: Configure model (acked with session.updated)
+        - input_audio_buffer.append: Add audio chunk to queue (starts the
+          deferred generation if a commit arrived before any audio)
+        - input_audio_buffer.commit: Start transcription generation, deferred
+          to the first append when no audio has been received yet
         """
         event_type = event.get("type")
         if event_type == "session.update":
@@ -114,6 +123,9 @@ class RealtimeConnection:
                 await self.send_error(err.error.message, "model_not_found")
                 return
             self._is_model_validated = True
+            # Explicit ack so clients can sequence their handshake on an
+            # event instead of fixed delays.
+            await self.send(SessionUpdated(model=model))
         elif event_type == "input_audio_buffer.append":
             append_event = InputAudioBufferAppend(**event)
             try:
@@ -135,6 +147,17 @@ class RealtimeConnection:
 
                 # Put audio chunk in queue
                 self.audio_queue.put_nowait(audio_array)
+                self._audio_received = True
+
+                # A commit arrived before any audio: start the deferred
+                # generation now that the first chunk is here.
+                if self._arm_pending:
+                    self._arm_pending = False
+                    logger.debug(
+                        "Starting deferred generation on first audio append (%s)",
+                        self.connection_id,
+                    )
+                    await self.start_generation()
 
             except Exception as e:
                 logger.error("Failed to decode audio: %s", e)
@@ -155,9 +178,37 @@ class RealtimeConnection:
             commit_event = InputAudioBufferCommit(**event)
             # final signals that the audio is finished
             if commit_event.final:
+                if self._arm_pending and not self._audio_received:
+                    # The client armed then ended the stream without ever
+                    # sending audio: there is no generation to finish. Close
+                    # the exchange explicitly instead of leaving the client
+                    # waiting for a done event that would never come.
+                    self._arm_pending = False
+                    await self.send(
+                        TranscriptionDone(
+                            text="",
+                            usage=UsageInfo(
+                                prompt_tokens=0,
+                                completion_tokens=0,
+                                total_tokens=0,
+                            ),
+                        )
+                    )
+                    return
                 self.audio_queue.put_nowait(None)
-            else:
+            elif self._audio_received:
                 await self.start_generation()
+            else:
+                # Lazy arming: no audio yet, so starting a generation now
+                # would run the engine over an empty audio queue. Defer to
+                # the first append; a connection cut before any audio then
+                # leaves nothing running server-side.
+                self._arm_pending = True
+                logger.debug(
+                    "Commit received before any audio; deferring generation"
+                    " start until the first append (%s)",
+                    self.connection_id,
+                )
         else:
             await self.send_error(f"Unknown event type: {event_type}", "unknown_event")
 
@@ -272,7 +323,8 @@ class RealtimeConnection:
                 pass
 
     async def send(
-        self, event: SessionCreated | TranscriptionDelta | TranscriptionDone
+        self,
+        event: SessionCreated | SessionUpdated | TranscriptionDelta | TranscriptionDone,
     ):
         """Send event to client."""
         data = event.model_dump_json()
