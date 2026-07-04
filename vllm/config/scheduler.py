@@ -87,19 +87,22 @@ class SchedulerConfig:
     transcription sessions: after a session has emitted the model's blank
     token more than this many consecutive times, a progressive penalty is
     applied to that token (see `realtime_blank_penalty`). Set well above the
-    longest healthy silence run of the model (Voxtral realtime: healthy runs
-    are 25-65 frames, i.e. 2-5 s at 12.5 tok/s). 0 disables (default)."""
+    longest healthy silence run of the model (Voxtral realtime: natural
+    inter-sentence silences reach ~165 frames, i.e. 13 s at 12.5 tok/s;
+    200 is a validated value). 0 disables (default)."""
 
     realtime_blank_penalty: float = Field(default=0.5, gt=0)
     """[EXPERIMENTAL] With `realtime_blank_run_k` > 0, the penalty slope:
     penalty = min(cap, alpha * (run - k)) logits subtracted from the blank
     token, where alpha is this value."""
 
-    realtime_blank_penalty_cap: float = Field(default=8.0, gt=0)
+    realtime_blank_penalty_cap: float = Field(default=7.0, gt=0)
     """[EXPERIMENTAL] With `realtime_blank_run_k` > 0, the penalty ceiling.
     Must stay below the blank token's logit margin on genuinely silent audio
     (so real silence keeps decoding as silence) while exceeding its margin
-    inside a rut over real speech."""
+    inside a rut over real speech. Measured on Voxtral realtime: margin is
+    +11 to +17 logits on true silence (min +8.5) vs +3.5 to +6.6 inside a
+    rut, so 7.0 breaks ruts without ever touching real silence."""
 
     max_num_partial_prefills: int = Field(default=1, ge=1)
     """For chunked prefill, the maximum number of sequences that can be

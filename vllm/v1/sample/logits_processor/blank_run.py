@@ -21,7 +21,7 @@ a marginal rut over speech (small margin) is broken.
 Enabled per request via::
 
     SamplingParams(extra_args={"blank_run_penalty": {
-        "token_id": 32, "k": 100, "alpha": 0.5, "cap": 8.0}})
+        "token_id": 32, "k": 200, "alpha": 0.5, "cap": 7.0}})
 """
 
 from dataclasses import dataclass
