@@ -263,3 +263,50 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True vllm serve mistralai/Voxtral-Mi
   --enable-realtime-unbounded --realtime-reanchor-margin-tokens 2048 \
   --compilation-config '{"cudagraph_mode":"PIECEWISE"}'
 ```
+
+**Silence-rut mitigation: the blank-run penalty.** Sliding-window realtime models that
+re-ingest their own output can fall into a self-sustained decoding rut: on marginal audio the
+model starts emitting its blank/silence token every frame and keeps doing so over real speech,
+for minutes, while the engine looks perfectly healthy (steady 1 token/frame, empty deltas).
+Temperature does not help -- the distribution genuinely collapses on the blank token. The
+mitigation penalizes the blank token progressively once a request has emitted it more than K
+consecutive times (`penalty = min(cap, alpha * (run - K))`):
+
+```bash
+  --realtime-blank-run-k 200
+```
+
+- `--realtime-blank-run-k` (default 0 = off): consecutive blank frames before the penalty
+  engages. Set it well above the longest natural inter-sentence silence run of the model
+  (Voxtral realtime: natural runs reach ~165 frames, i.e. 13 s at 12.5 tok/s; 200 is a
+  validated value).
+- `--realtime-blank-penalty` (default 0.5) and `--realtime-blank-penalty-cap` (default 7.0):
+  slope and ceiling. The defaults are calibrated from measured logit margins on Voxtral
+  realtime (blank wins by +3.5 to +6.6 logits inside a rut, by +8.5 to +17 on genuinely silent
+  audio), so a saturated penalty breaks a rut but never flips real silence into invented text.
+  You should not need to change them unless a future checkpoint shifts those margins.
+
+The blank token id is declared by the model class (`SupportsRealtime.realtime_blank_token_id`,
+32 for Voxtral realtime); models that do not declare one ignore the flag. Validated on a
+deterministic reproducer: a 179 s mute episode is cut to ~18 s, healthy channels never see the
+penalty, and 3 minutes of pure silence still produce zero text.
+
+**Dedicated realtime deployments: `--realtime-exclusive`.** A non-realtime request (for
+example `/v1/chat/completions`) co-scheduled with live realtime sessions can crash the engine
+in multimodal batch preprocessing, killing every active session -- on a dedicated realtime
+server, any client hitting the wrong endpoint can take the whole live service down. With
+`--realtime-exclusive` the server serves only the realtime task: other endpoints are not
+mounted and answer 404, and startup fails fast if the model does not support realtime.
+
+**Sizing `--max-num-batched-tokens`.** One realtime encoder chunk is ~350-400 tokens. If the
+token budget is smaller than that, every chunk is split across several scheduler steps, and on
+marginal audio this splitting alone can seed the silence rut, even for a single stream. Size
+the budget so chunks are not split: at least 512 for a single stream, ideally
+`N_streams x 400`. (The blank-run penalty bounds the damage either way; correct sizing makes
+the trigger rarer in the first place.)
+
+A production line for a dedicated Voxtral realtime server, combining the above:
+
+```bash
+  --enable-realtime-unbounded --realtime-blank-run-k 200 --realtime-exclusive
+```
