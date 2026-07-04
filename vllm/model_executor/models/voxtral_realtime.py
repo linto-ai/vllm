@@ -262,8 +262,13 @@ class VoxtralRealtimeGeneration(VoxtralForConditionalGeneration, SupportsRealtim
                     # Prepend left padding before first real audio
                     await buffer.append_audio(left_pad.audio_array)
                 await buffer.append_audio(audio_chunk)
-            # Append right padding at the end
-            await buffer.append_audio(right_pad.audio_array)
+            # Right padding closes the last real audio window. A stream that
+            # ended without ever producing audio has nothing to close: skip
+            # the padding so the model is never run over padding-only input
+            # (which surfaces as empty multimodal embeddings and falls back
+            # to zero embeddings).
+            if yielded_first_chunk:
+                await buffer.append_audio(right_pad.audio_array)
             await buffer.append_audio(None)  # signal end
 
         # Feed output tokens back into the buffer. input_stream is a token

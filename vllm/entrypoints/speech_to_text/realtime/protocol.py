@@ -45,6 +45,18 @@ class SessionCreated(OpenAIBaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
 
 
+class SessionUpdated(OpenAIBaseModel):
+    """Session configuration acknowledged (model validated).
+
+    Lets clients sequence their handshake on an explicit ack instead of
+    fixed delays. The upstream realtime test-suite already probes for this
+    event (and tolerates servers that do not implement it).
+    """
+
+    type: Literal["session.updated"] = "session.updated"
+    model: str | None = None
+
+
 class TranscriptionDelta(OpenAIBaseModel):
     """Incremental transcription text"""
 
