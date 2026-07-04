@@ -616,6 +616,20 @@ async def build_and_serve(
     supported_tasks = await engine_client.get_supported_tasks()
     model_config = engine_client.model_config
 
+    if getattr(args, "realtime_exclusive", False):
+        if "realtime" not in supported_tasks:
+            raise ValueError(
+                "--realtime-exclusive requires a model that supports the"
+                f" realtime task (supported: {supported_tasks})"
+            )
+        dropped = tuple(t for t in supported_tasks if t != "realtime")
+        supported_tasks = ("realtime",)
+        logger.info(
+            "Realtime-exclusive mode: only the realtime task is served;"
+            " disabled tasks: %s",
+            dropped,
+        )
+
     logger.info("Supported tasks: %s", supported_tasks)
     app = build_app(args, supported_tasks, model_config)
     await init_app_state(engine_client, app.state, args, supported_tasks)
