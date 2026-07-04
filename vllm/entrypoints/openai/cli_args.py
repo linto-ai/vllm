@@ -242,6 +242,13 @@ class FrontendArgs(BaseFrontendArgs):
     probe is declared failed in multi-port external LB mode."""
     uds: str | None = None
     """Unix domain socket path. If set, host and port arguments are ignored."""
+    realtime_exclusive: bool = False
+    """Serve ONLY the realtime WebSocket task: all other API tasks (chat
+    completions, completions, transcriptions, ...) are disabled and their
+    endpoints answer with a clear error. Use this on dedicated realtime
+    deployments: a non-realtime request co-scheduled with live realtime
+    sessions can crash the engine (multimodal batch preprocessing), killing
+    every active session."""
     uvicorn_log_level: Literal[
         "critical", "error", "warning", "info", "debug", "trace"
     ] = "info"
