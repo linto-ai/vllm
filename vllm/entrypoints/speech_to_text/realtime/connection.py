@@ -288,6 +288,7 @@ class RealtimeConnection:
                             "k": sched.realtime_blank_run_k,
                             "alpha": sched.realtime_blank_penalty,
                             "cap": sched.realtime_blank_penalty_cap,
+                            "abort_after": sched.realtime_blank_run_abort_after,
                         }
                     }
 

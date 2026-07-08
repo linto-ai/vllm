@@ -4773,6 +4773,9 @@ class GPUModelRunner(
                 num_nans_in_logits=num_nans_in_logits,
                 cudagraph_stats=cudagraph_stats,
                 routed_experts=None,
+                blank_run_aborts=(
+                    self.blank_run_penalizer.drain_aborts() or None
+                ),
             )
 
         if not self.use_async_scheduling:

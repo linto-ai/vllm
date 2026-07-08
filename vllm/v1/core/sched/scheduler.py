@@ -204,6 +204,10 @@ class Scheduler(SchedulerInterface):
         # number of unfinished requests
         self.num_waiting_for_streaming_input: int = 0
 
+        # req_ids flagged by the blank-run penalizer (abort_after), finished
+        # at the top of the next schedule() via the LENGTH_CAPPED flow.
+        self._pending_blank_run_aborts: set[str] = set()
+
         # KV Connector: requests in process of async KV loading or recving
         self.finished_recving_kv_req_ids: set[str] = set()
         self.failed_recving_kv_req_ids: set[str] = set()
@@ -398,6 +402,21 @@ class Scheduler(SchedulerInterface):
 
     def schedule(self, throttle_prefills: bool = False) -> SchedulerOutput:
         self.current_step += 1
+        if self._pending_blank_run_aborts:
+            for req_id in self._pending_blank_run_aborts:
+                request = self.requests.get(req_id)
+                if request is None or request.is_finished():
+                    continue
+                logger.warning(
+                    "blank-run abort: finishing realtime session %s", req_id
+                )
+                finished = self.finish_requests(
+                    req_id, RequestStatus.FINISHED_LENGTH_CAPPED
+                )
+                self._buffer_streaming_finish(
+                    finished, RequestStatus.FINISHED_LENGTH_CAPPED
+                )
+            self._pending_blank_run_aborts.clear()
         # NOTE(woosuk) on the scheduling algorithm:
         # There's no "decoding phase" nor "prefill phase" in the scheduler.
         # Each request just has the num_computed_tokens and
@@ -1696,6 +1715,10 @@ class Scheduler(SchedulerInterface):
         num_scheduled_tokens = scheduler_output.num_scheduled_tokens
         pooler_outputs = model_runner_output.pooler_output
         num_nans_in_logits = model_runner_output.num_nans_in_logits
+        if model_runner_output.blank_run_aborts:
+            self._pending_blank_run_aborts.update(
+                model_runner_output.blank_run_aborts
+            )
         kv_connector_output = model_runner_output.kv_connector_output
         cudagraph_stats = model_runner_output.cudagraph_stats
 

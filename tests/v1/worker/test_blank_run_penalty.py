@@ -134,3 +134,81 @@ def test_parse_config_rejects_bad(bad):
 def test_parse_config_absent_and_valid():
     assert parse_config(SamplingParams()) is None
     assert parse_config(make_params()) is not None
+
+
+# ---------------------------------------------------------------------------
+# Session abort (abort_after > 0)
+# ---------------------------------------------------------------------------
+
+def make_abort_params(abort_after=2, **kw):
+    params = make_params(**kw)
+    params.extra_args["blank_run_penalty"]["abort_after"] = abort_after
+    return params
+
+
+def test_parse_config_abort_field():
+    assert parse_config(make_abort_params(abort_after=2)).abort_after == 2
+    assert parse_config(make_params()).abort_after == 0  # default: off
+
+
+def test_two_broken_runs_abort():
+    # stuck session: >K blanks, one forced token, again -> 2 breaks in a row
+    pen = BlankRunPenalizer()
+    params = {"a": make_abort_params()}
+    schedule = (
+        [{"a": BLANK}] * (K + 5) + [{"a": 7}]
+        + [{"a": BLANK}] * (K + 5) + [{"a": 7}]
+    )
+    run_steps(pen, params, schedule)
+    assert pen.drain_aborts() == ["a"]
+    assert pen.drain_aborts() == []
+
+
+def test_true_silence_never_aborts():
+    # margin > cap: the run never breaks, so no abort can fire
+    pen = BlankRunPenalizer()
+    params = {"a": make_abort_params()}
+    run_steps(pen, params, [{"a": BLANK}] * (10 * K))
+    assert pen.drain_aborts() == []
+
+
+def test_speech_resumption_resets_streak():
+    # long pause -> one break -> real speech disarms; a later pause is streak=1
+    pen = BlankRunPenalizer()
+    params = {"a": make_abort_params()}
+    schedule = (
+        [{"a": BLANK}] * (K + 5) + [{"a": 7}]
+        + [{"a": 8}] * 10
+        + [{"a": BLANK}] * (K + 5) + [{"a": 9}]
+    )
+    run_steps(pen, params, schedule)
+    assert pen.drain_aborts() == []
+
+
+def test_abort_disabled_by_default():
+    pen = BlankRunPenalizer()
+    params = {"a": make_params()}
+    schedule = ([{"a": BLANK}] * (K + 5) + [{"a": 7}]) * 4
+    run_steps(pen, params, schedule)
+    assert pen.drain_aborts() == []
+
+
+def test_few_tokens_between_breaks_keep_streak():
+    # a stuck session can force 2-3 junk tokens per break, not always one
+    pen = BlankRunPenalizer()
+    params = {"a": make_abort_params()}
+    schedule = (
+        [{"a": BLANK}] * (K + 5) + [{"a": 7}, {"a": 7}]
+        + [{"a": BLANK}] * (K + 5) + [{"a": 7}]
+    )
+    run_steps(pen, params, schedule)
+    assert pen.drain_aborts() == ["a"]
+
+
+def test_prune_clears_abort_state():
+    pen = BlankRunPenalizer()
+    params = {"a": make_abort_params()}
+    run_steps(pen, params, [{"a": BLANK}] * (K + 5) + [{"a": 7}])
+    pen.prune(set())
+    assert pen._break_streaks == {}
+    assert pen._tokens_since_break == {}

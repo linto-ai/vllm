@@ -266,6 +266,10 @@ class ModelRunnerOutput:
     # req_id -> num_nans_in_logits
     num_nans_in_logits: dict[str, int] | None = None
 
+    # req_ids flagged by the blank-run penalizer this step (abort_after);
+    # the scheduler finishes them. See v1/worker/blank_run_penalty.py.
+    blank_run_aborts: list[str] | None = None
+
     # information related to cudagraph execution
     cudagraph_stats: CUDAGraphStat | None = None
 

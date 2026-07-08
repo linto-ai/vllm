@@ -96,6 +96,15 @@ class SchedulerConfig:
     penalty = min(cap, alpha * (run - k)) logits subtracted from the blank
     token, where alpha is this value."""
 
+    realtime_blank_run_abort_after: int = Field(default=0, ge=0)
+    """[EXPERIMENTAL] With `realtime_blank_run_k` > 0, end the session after
+    this many penalty-broken blank runs in a row (the model is stuck: it
+    re-enters blanks right after each forced token). True silence never
+    breaks a run (margin > cap) so this cannot fire on silent audio. Ends
+    with the same graceful flow as the max_model_len cap; a streaming client
+    reconnects in seconds. 0 disables (default), 2 recommended (~2*k frames
+    detection latency)."""
+
     realtime_blank_penalty_cap: float = Field(default=7.0, gt=0)
     """[EXPERIMENTAL] With `realtime_blank_run_k` > 0, the penalty ceiling.
     Must stay below the blank token's logit margin on genuinely silent audio

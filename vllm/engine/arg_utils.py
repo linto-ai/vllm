@@ -533,6 +533,8 @@ class EngineArgs:
     realtime_blank_run_k: int = SchedulerConfig.realtime_blank_run_k
     realtime_blank_penalty: float = SchedulerConfig.realtime_blank_penalty
     realtime_blank_penalty_cap: float = SchedulerConfig.realtime_blank_penalty_cap
+    realtime_blank_run_abort_after: int = (
+        SchedulerConfig.realtime_blank_run_abort_after)
     max_num_seqs: int | None = None
     max_logprobs: int = ModelConfig.max_logprobs
     logprobs_mode: LogprobsMode = ModelConfig.logprobs_mode
@@ -1446,6 +1448,10 @@ class EngineArgs:
             "--realtime-blank-penalty-cap",
             **scheduler_kwargs["realtime_blank_penalty_cap"],
         )
+        scheduler_group.add_argument(
+            "--realtime-blank-run-abort-after",
+            **scheduler_kwargs["realtime_blank_run_abort_after"],
+        )
         # multi-step scheduling has been removed; corresponding arguments
         # are no longer supported.
         scheduler_group.add_argument(
@@ -2181,6 +2187,7 @@ class EngineArgs:
             realtime_blank_run_k=self.realtime_blank_run_k,
             realtime_blank_penalty=self.realtime_blank_penalty,
             realtime_blank_penalty_cap=self.realtime_blank_penalty_cap,
+            realtime_blank_run_abort_after=self.realtime_blank_run_abort_after,
             scheduler_reserve_full_isl=self.scheduler_reserve_full_isl,
             watermark=self.watermark,
             prefill_schedule_interval=self.prefill_schedule_interval,
