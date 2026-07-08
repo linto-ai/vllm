@@ -402,21 +402,6 @@ class Scheduler(SchedulerInterface):
 
     def schedule(self, throttle_prefills: bool = False) -> SchedulerOutput:
         self.current_step += 1
-        if self._pending_blank_run_aborts:
-            for req_id in self._pending_blank_run_aborts:
-                request = self.requests.get(req_id)
-                if request is None or request.is_finished():
-                    continue
-                logger.warning(
-                    "blank-run abort: finishing realtime session %s", req_id
-                )
-                finished = self.finish_requests(
-                    req_id, RequestStatus.FINISHED_LENGTH_CAPPED
-                )
-                self._buffer_streaming_finish(
-                    finished, RequestStatus.FINISHED_LENGTH_CAPPED
-                )
-            self._pending_blank_run_aborts.clear()
         # NOTE(woosuk) on the scheduling algorithm:
         # There's no "decoding phase" nor "prefill phase" in the scheduler.
         # Each request just has the num_computed_tokens and
@@ -1977,6 +1962,25 @@ class Scheduler(SchedulerInterface):
                         trace_headers=request.trace_headers,
                     )
                 )
+
+        # Blank-run aborts flagged by the worker this step: finish now and
+        # deliver through the flush below. Deferring to the next schedule()
+        # would hang a sole session (an idle engine stops stepping).
+        if self._pending_blank_run_aborts:
+            for req_id in self._pending_blank_run_aborts:
+                request = self.requests.get(req_id)
+                if request is None or request.is_finished():
+                    continue
+                logger.warning(
+                    "blank-run abort: finishing realtime session %s", req_id
+                )
+                finished_reqs = self.finish_requests(
+                    req_id, RequestStatus.FINISHED_LENGTH_CAPPED
+                )
+                self._buffer_streaming_finish(
+                    finished_reqs, RequestStatus.FINISHED_LENGTH_CAPPED
+                )
+            self._pending_blank_run_aborts.clear()
 
         # Drain finishes buffered by schedule()/add_request() (request already
         # freed; only place the client learns it ended).
